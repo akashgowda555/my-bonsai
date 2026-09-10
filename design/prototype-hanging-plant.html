@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Plant</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500&display=swap');
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; }
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    background: radial-gradient(120% 80% at 50% 6%, #f4f1e9 0%, #eae7dc 55%, #dddccf 100%);
+    color:#3d4a3a; display:flex; flex-direction:column; align-items:center; min-height:100vh; padding:20px;
+  }
+  .brand{ text-align:center; margin-bottom:2px; }
+  .brand h1{ font-family:'Fraunces',serif; font-weight:600; font-size:1.8rem; color:#39462f; }
+  .brand p{ font-size:.83rem; color:#7c8b72; margin-top:3px; }
+  .frame{ width:min(460px,94vw); flex:1; }
+  svg{ display:block; width:100%; height:auto; }
+  .strand-hit{ cursor:pointer; }
+  .dock{ margin-top:8px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; justify-content:center;
+    background:rgba(255,255,255,.55); backdrop-filter:blur(6px);
+    border:1px solid rgba(90,110,80,.14); border-radius:14px; padding:10px 16px; }
+  .dock .g{ display:flex; align-items:center; gap:8px; font-size:.8rem; color:#6d7c67; }
+  input[type=range]{ -webkit-appearance:none; width:104px; height:4px; border-radius:2px; background:rgba(90,110,80,.2); }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:#7aa85f;cursor:pointer; }
+  input[type=range]::-moz-range-thumb{ width:14px;height:14px;border:none;border-radius:50%;background:#7aa85f;cursor:pointer; }
+  .sep{ width:1px; height:24px; background:rgba(90,110,80,.16); }
+  button{ font-family:inherit; font-size:.8rem; color:#3c4a3a; background:rgba(255,255,255,.75);
+    border:1px solid rgba(90,110,80,.22); border-radius:10px; padding:7px 12px; cursor:pointer; }
+  button:hover{ border-color:#7aa85f; background:#fff; }
+  button.bloom{ background:#f7e2ea; border-color:#e6b9cc; }
+  button.bloom:hover{ background:#fbe9ef; }
+  .count b{ color:#3c4a3a; font-weight:600; }
+  .foot{ margin-top:10px; font-size:.72rem; color:#8b9a84; text-align:center; max-width:430px; line-height:1.5; }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <h1>My Plant</h1>
+    <p>It trails down and grows · click a strand to trim it</p>
+  </div>
+
+  <div class="frame">
+    <svg id="stage" viewBox="0 0 460 640" aria-label="A hanging string-of-pearls plant"></svg>
+  </div>
+
+  <div class="dock">
+    <div class="g"><span>Growth</span>
+      <span style="font-size:.7rem">calm</span>
+      <input type="range" id="speed" min="1" max="10" value="6">
+      <span style="font-size:.7rem">quick</span>
+    </div>
+    <div class="sep"></div>
+    <button class="bloom" id="bloom">Take a break 🌸</button>
+    <button id="reset">Plant a new one</button>
+    <div class="sep"></div>
+    <div class="g count">Trimmed&nbsp;<b id="snips">0</b></div>
+  </div>
+
+  <p class="foot">Preview grows in seconds; the real app grows over days. "Take a break" stands in for the app noticing you've stepped away — that's when it blooms.</p>
+
+<script>
+(function(){
+  const NS='http://www.w3.org/2000/svg';
+  const svg=document.getElementById('stage');
+  const speedEl=document.getElementById('speed');
+  const snipsEl=document.getElementById('snips');
+  let snips=0;
+
+  const W=460, H=640;
+  const POT={ cx:230, rimY:150, rimRx:80, rimRy:22, bodyH:98 };
+
+  const SEG=13, GRAV=0.55, DAMP=0.985, ITER=3;
+  let windPhase=Math.random()*10;
+
+  function mul(s){ return ()=>{ s|=0; s=s+0x6D2B79F5|0; let t=Math.imul(s^s>>>15,1|s); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+  let strands=[], flowers=[], falling=[];
+
+  function makeStrand(anchorX, anchorY, maxLen, lean, rng){
+    return { ax:anchorX, ay:anchorY, maxLen, lean, grow:2, target:2,
+      pts:[ {x:anchorX,y:anchorY,px:anchorX,py:anchorY},
+            {x:anchorX+lean*3,y:anchorY+SEG,px:anchorX,py:anchorY} ],
+      rng, tint:rng() };
+  }
+
+  function plant(seed){
+    const rng=mul(seed);
+    strands=[]; flowers=[]; falling=[]; snips=0; snipsEl.textContent='0';
+    const specs=[[-64,10],[-42,17],[-20,20],[2,14],[24,20],[46,15],[64,9],[-14,22],[16,23]];
+    const lens=[9,13,16,12,17,13,9,20,21];
+    specs.forEach((s,i)=>{
+      const ax=POT.cx+s[0];
+      const ay=POT.rimY + POT.rimRy*0.2 + (Math.abs(s[0])>50?4:0);
+      const lean=(s[0]<0?-1:1)*(0.4+rng()*0.5);
+      strands.push(makeStrand(ax, ay-2, lens[i]+Math.floor(rng()*3), lean, rng));
+    });
+  }
+
+  function step(dt, t){
+    const wind = Math.sin(t*0.7+windPhase)*0.22 + Math.sin(t*1.9)*0.08;
+    for(const st of strands){
+      const rate = 0.05 + (parseInt(speedEl.value)/10)*0.6;
+      st.grow = Math.min(st.maxLen, st.grow + rate);
+      st.target = Math.floor(st.grow);
+      while(st.pts.length < st.target){
+        const tail=st.pts[st.pts.length-1];
+        st.pts.push({x:tail.x+st.lean, y:tail.y+2, px:tail.x, py:tail.y});
+      }
+      for(let i=1;i<st.pts.length;i++){
+        const p=st.pts[i];
+        const vx=(p.x-p.px)*DAMP, vy=(p.y-p.py)*DAMP;
+        p.px=p.x; p.py=p.y;
+        p.x += vx + wind*(i/st.pts.length);
+        p.y += vy + GRAV;
+      }
+      for(let k=0;k<ITER;k++){
+        st.pts[0].x=st.ax; st.pts[0].y=st.ay;
+        for(let i=1;i<st.pts.length;i++){
+          const a=st.pts[i-1], b=st.pts[i];
+          let dx=b.x-a.x, dy=b.y-a.y;
+          const d=Math.hypot(dx,dy)||0.001;
+          const diff=(d-SEG)/d, mx=dx*0.5*diff, my=dy*0.5*diff;
+          if(i>1){ a.x+=mx; a.y+=my; }
+          b.x-=mx; b.y-=my;
+        }
+      }
+    }
+    for(const f of falling){ f.vy+=GRAV*0.6; f.x+=f.vx; f.y+=f.vy; f.life-=dt; }
+    falling=falling.filter(f=>f.life>0 && f.y<H+40);
+  }
+
+  const GREENS=['#93c274','#82b566','#a2d086','#79aa5b','#8cbe6d'];
+
+  function draw(t){
+    let out='';
+    out += `<defs>
+      <filter id="paint" x="-40%" y="-40%" width="180%" height="180%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="4" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="3.2"/>
+      </filter>
+      <radialGradient id="pearlG" cx="38%" cy="32%" r="72%">
+        <stop offset="0%" stop-color="#d8efbe"/><stop offset="55%" stop-color="#93c274"/><stop offset="100%" stop-color="#5f9a4e"/>
+      </radialGradient>
+      <radialGradient id="vign" cx="50%" cy="40%" r="70%">
+        <stop offset="70%" stop-color="rgba(0,0,0,0)"/><stop offset="100%" stop-color="rgba(70,80,60,0.06)"/>
+      </radialGradient>
+    </defs>`;
+
+    out += `<path d="M170 24 Q${POT.cx} 58 ${POT.cx-60} 150" stroke="#c3ac86" stroke-width="2" fill="none" opacity=".85"/>`;
+    out += `<path d="M292 24 Q${POT.cx} 58 ${POT.cx+60} 150" stroke="#c3ac86" stroke-width="2" fill="none" opacity=".85"/>`;
+    out += `<circle cx="231" cy="20" r="4.5" fill="#c3ac86"/>`;
+
+    const rx=POT.rimRx, ry=POT.rimRy, cx=POT.cx, ry0=POT.rimY, bh=POT.bodyH;
+    out += `<g filter="url(#paint)">
+      <path d="M ${cx-rx} ${ry0}
+        C ${cx-rx} ${ry0+bh*0.72}, ${cx-rx*0.5} ${ry0+bh}, ${cx} ${ry0+bh}
+        C ${cx+rx*0.5} ${ry0+bh}, ${cx+rx} ${ry0+bh*0.72}, ${cx+rx} ${ry0} Z"
+        fill="#f4efe6"/></g>`;
+    out += `<path d="M ${cx+rx*0.55} ${ry0+6} C ${cx+rx} ${ry0+bh*0.6}, ${cx+rx*0.4} ${ry0+bh}, ${cx} ${ry0+bh}"
+      stroke="#e6dccb" stroke-width="7" fill="none" opacity=".5"/>`;
+    out += `<ellipse cx="${cx-34}" cy="${ry0+64}" rx="9" ry="6" fill="#f6c3ad" opacity=".55"/>`;
+    out += `<ellipse cx="${cx+34}" cy="${ry0+64}" rx="9" ry="6" fill="#f6c3ad" opacity=".55"/>`;
+    const ey=ry0+54;
+    out += `<path d="M ${cx-30} ${ey} q 11 12 22 0" stroke="#3a3a34" stroke-width="3" fill="none" stroke-linecap="round"/>`;
+    out += `<path d="M ${cx+8} ${ey} q 11 12 22 0" stroke="#3a3a34" stroke-width="3" fill="none" stroke-linecap="round"/>`;
+    out += `<path d="M ${cx-39} ${ey-3} l -8 -4 M ${cx-41} ${ey+3} l -9 1" stroke="#3a3a34" stroke-width="2" stroke-linecap="round"/>`;
+    out += `<path d="M ${cx+39} ${ey-3} l 8 -4 M ${cx+41} ${ey+3} l 9 1" stroke="#3a3a34" stroke-width="2" stroke-linecap="round"/>`;
+    out += `<path d="M ${cx-6} ${ey+16} q 6 5 12 0" stroke="#c98b7a" stroke-width="2.2" fill="none" stroke-linecap="round"/>`;
+
+    out += `<ellipse cx="${cx}" cy="${ry0}" rx="${rx-6}" ry="${ry-4}" fill="#4a3524"/>`;
+    const cr=mul(999);
+    let crown='';
+    for(let i=0;i<30;i++){
+      const a=cr()*Math.PI*2, rr=cr();
+      const x=cx+Math.cos(a)*rx*0.82*rr, y=ry0-5+Math.sin(a)*ry*0.7*rr;
+      const r=4.8+cr()*1.8;
+      crown += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="url(#pearlG)"/>`;
+    }
+    out += `<g filter="url(#paint)">${crown}</g>`;
+
+    let body='';
+    strands.forEach((st,si)=>{
+      if(st.pts.length<2) return;
+      let d=`M ${st.pts[0].x.toFixed(1)} ${st.pts[0].y.toFixed(1)}`;
+      for(let i=1;i<st.pts.length;i++) d+=` L ${st.pts[i].x.toFixed(1)} ${st.pts[i].y.toFixed(1)}`;
+      body += `<path d="${d}" stroke="#6f9e56" stroke-width="2.2" fill="none" opacity=".9"/>`;
+      for(let i=1;i<st.pts.length;i++){
+        const p=st.pts[i];
+        const r=Math.max(2.6, 5.6*(1 - i/st.maxLen*0.4));
+        body += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r.toFixed(1)}" fill="url(#pearlG)"/>`;
+        body += `<circle cx="${(p.x-r*0.32).toFixed(1)}" cy="${(p.y-r*0.36).toFixed(1)}" r="${(r*0.3).toFixed(1)}" fill="#eaf7d6" opacity=".85"/>`;
+      }
+    });
+    out += `<g filter="url(#paint)">${body}</g>`;
+
+    for(const f of falling){
+      out += `<circle cx="${f.x.toFixed(1)}" cy="${f.y.toFixed(1)}" r="4.4" fill="url(#pearlG)" opacity="${Math.max(0,Math.min(1,f.life)).toFixed(2)}"/>`;
+    }
+
+    flowers = flowers.filter(fl=>{
+      const st=strands[fl.si]; if(!st||fl.idx>=st.pts.length) return false;
+      const age=t-fl.born; if(age>fl.life) return false;
+      const p=st.pts[fl.idx];
+      const grow=Math.min(1, age/0.5);
+      const fade=age>fl.life-1 ? Math.max(0,(fl.life-age)) : 1;
+      const s=grow*fade, R=7*s;
+      let g=`<g opacity="${fade.toFixed(2)}">`;
+      for(let k=0;k<5;k++){
+        const a=k/5*Math.PI*2 + fl.rot;
+        const px=p.x+Math.cos(a)*R, py=p.y+Math.sin(a)*R;
+        g+=`<ellipse cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" rx="${(R*0.7).toFixed(1)}" ry="${(R*0.42).toFixed(1)}" fill="${fl.color}" transform="rotate(${(a*180/Math.PI).toFixed(0)} ${px.toFixed(1)} ${py.toFixed(1)})"/>`;
+      }
+      g+=`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${(R*0.5).toFixed(1)}" fill="#f4b400"/></g>`;
+      out += g; return true;
+    });
+
+    out += `<rect x="0" y="0" width="${W}" height="${H}" fill="url(#vign)" pointer-events="none"/>`;
+
+    strands.forEach((st,si)=>{
+      if(st.pts.length<3) return;
+      let d=`M ${st.pts[0].x.toFixed(1)} ${st.pts[0].y.toFixed(1)}`;
+      for(let i=1;i<st.pts.length;i++) d+=` L ${st.pts[i].x.toFixed(1)} ${st.pts[i].y.toFixed(1)}`;
+      out += `<path class="strand-hit" data-si="${si}" d="${d}" stroke="transparent" stroke-width="18" fill="none"/>`;
+    });
+
+    svg.innerHTML=out;
+  }
+
+  function svgPoint(evt){
+    const pt=svg.createSVGPoint(); pt.x=evt.clientX; pt.y=evt.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  svg.addEventListener('click', (e)=>{
+    const p=svgPoint(e);
+    let best=null, bestD=22;
+    strands.forEach((st,si)=>{ for(let i=1;i<st.pts.length;i++){
+      const dd=Math.hypot(st.pts[i].x-p.x, st.pts[i].y-p.y);
+      if(dd<bestD){ bestD=dd; best={si,i}; } } });
+    if(best) trim(best.si, best.i);
+  });
+
+  function trim(si, idx){
+    const st=strands[si]; if(!st || idx>=st.pts.length) return;
+    for(let i=idx;i<st.pts.length;i++){
+      const p=st.pts[i];
+      falling.push({x:p.x,y:p.y,vx:(Math.random()*2-1)*1.2,vy:0,life:1});
+    }
+    st.pts.length=idx; st.maxLen=idx; st.grow=idx; st.target=idx;
+    snips++; snipsEl.textContent=String(snips);
+  }
+
+  function bloom(){
+    const t=performance.now()/1000;
+    const colors=['#f6a8c3','#f7d774','#ffffff','#f2b6d0'];
+    const order=[...strands.keys()].sort(()=>Math.random()-0.5);
+    let placed=0;
+    for(const si of order){
+      const st=strands[si]; if(st.pts.length<4) continue;
+      const idx=3+Math.floor(Math.random()*(st.pts.length-3));
+      flowers.push({si, idx, born:t, life:9, rot:Math.random()*6.28, color:colors[Math.floor(Math.random()*colors.length)]});
+      if(++placed>=7) break;
+    }
+  }
+
+  document.getElementById('bloom').addEventListener('click', bloom);
+  document.getElementById('reset').addEventListener('click', ()=>plant((Math.random()*1e9)|0));
+
+  let prev=performance.now();
+  function loop(now){
+    const dt=Math.min(0.05,(now-prev)/1000); prev=now;
+    step(dt, now/1000); draw(now/1000);
+    requestAnimationFrame(loop);
+  }
+  plant((Math.random()*1e9)|0);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
