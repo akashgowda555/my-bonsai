@@ -1,11 +1,19 @@
 import AppKit
-import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var window: OverlayWindow!
-    private let store = BonsaiStore()
+    private let store = PlantStore()
     private var groomItem: NSMenuItem!
+
+    // Break detection -> bloom.
+    private var idleTimer: Timer?
+    private var didBloomThisBreak = false
+    #if DEBUG
+    private let breakThreshold: TimeInterval = 8
+    #else
+    private let breakThreshold: TimeInterval = 3 * 60
+    #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = OverlayWindow(store: store)
@@ -13,13 +21,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "leaf.fill",
-                                           accessibilityDescription: "My Bonsai")
+                                           accessibilityDescription: "My Plant")
 
         let menu = NSMenu()
 
         groomItem = NSMenuItem(title: "Grooming mode", action: #selector(toggleGrooming), keyEquivalent: "g")
         groomItem.target = self
         menu.addItem(groomItem)
+
+        let bloom = NSMenuItem(title: "Bloom now (test)", action: #selector(bloomNow), keyEquivalent: "b")
+        bloom.target = self
+        menu.addItem(bloom)
 
         let show = NSMenuItem(title: "Show / hide", action: #selector(toggleVisible), keyEquivalent: "d")
         show.target = self
@@ -30,25 +42,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(replant)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit My Bonsai",
-                                action: #selector(NSApplication.terminate(_:)),
-                                keyEquivalent: "q"))
-
+        menu.addItem(NSMenuItem(title: "Quit My Plant",
+                                action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
+
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.checkBreak()
+        }
+    }
+
+    /// Seconds since the last user input of any kind.
+    private func systemIdleSeconds() -> TimeInterval {
+        let types: [CGEventType] = [.mouseMoved, .keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel]
+        return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? 0
+    }
+
+    private func checkBreak() {
+        let idle = systemIdleSeconds()
+        if idle >= breakThreshold, !didBloomThisBreak {
+            window.scene.bloom()
+            didBloomThisBreak = true
+        }
+        if idle < 2 { didBloomThisBreak = false }   // back at the desk; arm for next break
     }
 
     @objc private func toggleGrooming() {
-        store.isGrooming.toggle()
-        window.setGrooming(store.isGrooming)
-        groomItem.state = store.isGrooming ? .on : .off
+        let on = groomItem.state != .on
+        window.setGrooming(on)
+        groomItem.state = on ? .on : .off
     }
+
+    @objc private func bloomNow() { window.scene.bloom() }
 
     @objc private func toggleVisible() {
-        if window.isVisible { window.orderOut(nil) }
-        else { window.orderFrontRegardless() }
+        if window.isVisible { window.orderOut(nil) } else { window.orderFrontRegardless() }
     }
 
-    @objc private func replant() {
-        store.replant()
-    }
+    @objc private func replant() { window.scene.replant() }
 }
