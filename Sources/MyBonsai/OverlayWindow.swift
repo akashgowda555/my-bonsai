@@ -1,43 +1,44 @@
 import AppKit
-import SwiftUI
+import SpriteKit
 
-/// A borderless, transparent window pinned to the top edge of the screen.
-/// Click-through while decorative; interactive only in grooming mode.
+/// A borderless, transparent window pinned to the top edge of the screen,
+/// hosting the plant as a SpriteKit scene. Click-through while decorative;
+/// interactive only in grooming mode so strands can be trimmed.
 final class OverlayWindow: NSWindow {
-    init(store: BonsaiStore) {
-        let width: CGFloat = 240
-        let height: CGFloat = 320
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
+    let scene: PlantScene
+    private let skView: SKView
+
+    init(store: PlantStore) {
+        let width: CGFloat = 300
+        let height: CGFloat = 480
+        let rect = NSRect(x: 0, y: 0, width: width, height: height)
+
+        skView = SKView(frame: rect)
+        skView.allowsTransparency = true
+        scene = PlantScene(size: rect.size, store: store)
+
+        super.init(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
 
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
         level = .statusBar
-        ignoresMouseEvents = true          // click-through by default
+        ignoresMouseEvents = true
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         isReleasedWhenClosed = false
 
-        contentView = NSHostingView(rootView: BonsaiView(store: store))
+        skView.presentScene(scene)
+        contentView = skView
         positionAtTopCenter()
     }
 
     func positionAtTopCenter() {
         guard let screen = NSScreen.main else { return }
         let f = screen.frame
-        let size = frame.size
-        setFrameOrigin(NSPoint(x: f.midX - size.width / 2,
-                               y: f.maxY - size.height))
+        setFrameOrigin(NSPoint(x: f.midX - frame.width / 2, y: f.maxY - frame.height))
     }
 
-    /// In grooming mode the window catches clicks so puffs can be pruned.
-    func setGrooming(_ on: Bool) {
-        ignoresMouseEvents = !on
-    }
+    func setGrooming(_ on: Bool) { ignoresMouseEvents = !on }
 
     override var canBecomeKey: Bool { true }
 }
